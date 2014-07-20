@@ -6,7 +6,7 @@ struct Tile {
     j: int
 }
 
-struct Pixel<'a> {
+struct Pixel {
     x: int,
     y: int
 }
@@ -25,7 +25,7 @@ struct Window {
     y1: f32
 }
 
-struct Options<'a> {
+struct Options {
     width_in_pixels: int,
     height_in_pixels: int,
     iterations: int,
