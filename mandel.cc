@@ -1,19 +1,9 @@
+#include <utility>
 #include <cmath>
+#include <cstdint>
 #include <fstream>
 #include <iostream>
 #include <vector>
-
-struct Tile
-{
-    int i;
-    int j;
-};
-
-struct Pixel
-{
-    int x;
-    int y;
-};
 
 struct SampleOffset
 {
@@ -38,13 +28,15 @@ struct Window
 
 struct Options
 {
-    int width;
-    int height;
     int iterations;
     Window window;
     std::vector<SampleOffset> sampleOffsets;
     std::vector<float> sampleWeights;
     float sampleWeightSum;
+    int width;
+    int height;
+    int tileWidth;
+    int tileHeight;
 };
 
 inline float
@@ -102,6 +94,96 @@ halton23(int index)
     return {halton(index, 2), halton(index, 3)};
 }
 
+int
+mandel(float cReal, float cImag, int iterations)
+{
+    float zReal = cReal;
+    float zImag = cImag;
+
+    int i = 0;
+    for (; i < iterations; ++i) {
+        float zRealSquared = zReal * zReal;
+        float zImagSquared = zImag * zImag;
+
+        if (zRealSquared + zImagSquared > 4.0f) break;
+
+        float newReal = zRealSquared - zImagSquared;
+        float newImag = 2.0f * zReal * zImag;
+        
+        zReal = cReal + newReal;
+        zImag = cImag + newImag;
+    }
+
+    return i;
+}
+
+Rgb
+shade(int val, int max)
+{
+    const float v = (val < max - 1) ? float(val) / max : 0.0f;
+    return {v, v, v};
+}
+
+void
+pixel(int x, int y, const Options& opts, std::vector<Rgb>& buf)
+{
+
+}
+
+void
+tile(int i, int j, const Options& opts, std::vector<Rgb>& buf)
+{
+    const int tileOffsetX = i * opts.tileWidth;
+    const int tileOffsetY = j * opts.tileHeight;
+
+    for (int ty = 0; ty < opts.tileHeight; ++ty) {
+        const int y = tileOffsetY + ty;
+        for (int tx = 0; tx < opts.tileWidth; ++tx) {
+            const int x = tileOffsetX + tx;
+            if (x >= opts.width || y >= opts.height) continue;
+            pixel(x, y, opts, buf);
+        }
+    }
+}
+
+void
+mandelbrot(const Options& opts, std::vector<Rgb>& buf)
+{
+    const int widthTiles = (opts.width / opts.tileWidth) +
+            ((opts.width % opts.tileWidth > 0) ? 1 : 0);
+    const int heightTiles = (opts.height / opts.tileHeight) +
+            ((opts.height % opts.tileHeight > 0) ? 1 : 0);
+
+    for (int j = 0; j < heightTiles; ++j) {
+        for (int i = 0; i < widthTiles; ++i) {
+            tile(i, j, opts, buf);
+        }
+    }
+}
+
+void
+write(const Options& opts, const std::vector<Rgb>& buf)
+{
+    const float oneOverGamma = 1.0f / 2.2f;
+
+    std::ofstream ppmFile("mandel.ppm", std::ios_base::out | std::ios_base::trunc);
+    ppmFile << "P3 " << opts.width << " " << opts.height << " 255\n";
+    for (int y = 0; y < opts.height; ++y) {
+        for (int x = 0; x < opts.width; ++x) {
+            const std::size_t index = y * opts.width + x;
+            const Rgb& rgb = buf[index];
+
+            // Gamma correction and 8-bit quantization.
+            auto r8 = std::uint8_t(std::pow(rgb.r, oneOverGamma) * 255.0f);
+            auto g8 = std::uint8_t(std::pow(rgb.g, oneOverGamma) * 255.0f);
+            auto b8 = std::uint8_t(std::pow(rgb.b, oneOverGamma) * 255.0f);
+
+            ppmFile << r8 << " " << g8 << " " << b8 << " ";
+        }
+        ppmFile << "\n";
+    }
+}
+
 void writeSamplingData()
 {
     const float size = 2.0f;
@@ -135,5 +217,46 @@ void writeSamplingData()
 }
 
 int main() {
-    writeSamplingData();
+    //writeSamplingData();
+
+    int width = 640;
+    int height = 480;
+    int tileWidth = 8;
+    int tileHeight = 8;
+    int samples = 64;
+    int iterations = 256;
+    float filterSize = 2.0f;
+    Window window = {-2.0f, 1.0f, -1.0f, 1.0f};
+
+    // Precompute subpixel sample offsets and weights.
+    std::vector<SampleOffset> sampleOffsets(samples);
+    std::vector<float> sampleWeights(samples);
+    float sampleWeightSum = 0.0f;
+    for (int i = 0; i < samples; ++i) {
+        auto offset = halton23(i);
+        offset.x = (offset.x - 0.5f) * filterSize;
+        offset.y = (offset.y - 0.5f) * filterSize;
+
+        const float weight = mitchellWeight(offset, filterSize / 2.0f);
+
+        sampleOffsets[i] = offset;
+        sampleWeights[i] = weight;
+        sampleWeightSum += weight;
+    }
+
+    // Allocate image buffer.
+    std::vector<Rgb> buf(width * height, {0.0f, 0.0f, 0.0f});
+
+    Options opts;
+    opts.iterations = iterations;
+    opts.window = window;
+    opts.sampleOffsets = std::move(sampleOffsets);
+    opts.sampleWeights = std::move(sampleWeights);
+    opts.sampleWeightSum = sampleWeightSum;
+    opts.width = width;
+    opts.height = height;
+    opts.tileWidth = tileWidth;
+    opts.tileHeight = tileHeight;
+
+    mandelbrot(opts, buf);
 }
