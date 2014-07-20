@@ -1,3 +1,23 @@
+static TILE_WIDTH: int = 8i;
+static TILE_HEIGHT: int = 8i;
+
+struct Tile {
+    i: int,
+    j: int
+}
+
+struct Pixel<'a> {
+    x: int,
+    y: int
+}
+
+#[deriving(Clone)]
+struct Rgb {
+    r: f32,
+    g: f32,
+    b: f32
+}
+
 struct Window {
     x0: f32,
     x1: f32,
@@ -5,12 +25,19 @@ struct Window {
     y1: f32
 }
 
-fn mandel(c_real: f32, c_imag: f32, depth: int) -> int {
+struct Options {
+    width_in_pixels: int,
+    height_in_pixels: int,
+    iterations: int,
+    window: Window
+}
+
+fn mandel(c_real: f32, c_imag: f32, iterations: int) -> int {
     let mut z_real = c_real;
     let mut z_imag = c_imag;
     let mut iter = 0i;
 
-    for i in range(0i, depth) {
+    for i in range(0i, iterations) {
         iter = i;
 
         if z_real * z_real + z_imag * z_imag > 4.0f32 {
@@ -27,53 +54,99 @@ fn mandel(c_real: f32, c_imag: f32, depth: int) -> int {
     iter
 }
 
-fn shade(x: f32, y: f32, w:f32, h: f32, val: int, max: int) -> (int, int, int) {
-    let r0 = (x / w * max as f32) as int;
-    let g0 = (y / h * max as f32) as int;
-    let b0 = (0.85f32 * (r0 + g0) as f32) as int % max;
-
-    let rf0 = r0 as f32 / max as f32;
-    let gf0 = g0 as f32 / max as f32;
-    let bf0 = b0 as f32 / max as f32;
-
-    let t = val as f32 / max as f32;
-
-    let r = (((1.0 - rf0) * t + rf0) * max as f32) as int;
-    let g = (((1.0 - gf0) * t + gf0) * max as f32) as int;
-    let b = (((1.0 - bf0) * t + bf0) * max as f32) as int;
-
-    if r == 255 && g == 255 && b == 255 {
-        return (0, 0, 0);
-    }
-
-    (r, g, b)
+fn shade(x: f32, y: f32, w:f32, h: f32, val: int, max: int) -> Rgb {
+    let v = val as f32 / max as f32;
+    Rgb{r: v, g: v, b: v}
 }
 
-fn single_threaded_mandelbrot(width: int, height: int, depth: int, window: Window) {
-    let image_width = width as f32;
-    let image_height = height as f32;
-    let window_width = window.x1 - window.x0;
-    let window_height = window.y1 - window.y0;
+fn pixel(pixel: Pixel, opts: &Options, buf: &mut Vec<Rgb>) {
+    if pixel.x >= opts.width_in_pixels { return; }
+    if pixel.y >= opts.height_in_pixels { return; }
 
-    for j in range(0i, height) {
-        let y = (j as f32 + 0.5f32) / image_height * window_height + window.y0;
-        for i in range(0i, width) {
-            let x = (i as f32 + 0.5f32) / image_width * window_width + window.x0;
-            let val = mandel(x, y, depth);
-            let (r, g, b) = shade(x, y, window_width, window_height, val, depth);
-            print!("{} {} {} ", r, g, b);
+    let center_x = pixel.x as f32 + 0.5;
+    let center_y = pixel.y as f32 + 0.5;
+
+    // Map pixel center to window space.
+    let window_width = opts.window.x1 - opts.window.x0;
+    let window_height = opts.window.y1 - opts.window.y0;
+    let x = center_x / (opts.width_in_pixels as f32) * window_width + opts.window.x0;
+    let y = center_y / (opts.height_in_pixels as f32) * window_height + opts.window.y0;
+
+    let val = mandel(x, y, opts.iterations);
+    let rgb = shade(x, y, window_width, window_height, val, opts.iterations);
+
+    let index = ((pixel.y * opts.height_in_pixels) + pixel.x) as uint;
+    *buf.get_mut(index) = rgb;
+}
+
+fn tile(tile: Tile, opts: &Options, buf: &mut Vec<Rgb>) {
+    let offset_x = tile.i * TILE_WIDTH;
+    let offset_y = tile.j * TILE_HEIGHT;
+
+    for ty in range(0i, TILE_HEIGHT) {
+        let y = offset_y + ty;
+        for tx in range(0i, TILE_WIDTH) {
+            let x = offset_x + tx;
+            pixel(Pixel{x: x, y: y}, opts, buf);
+        }
+    }
+}
+
+fn mandelbrot(opts: &Options, buf: &mut Vec<Rgb>) {
+    let width_in_tiles = opts.width_in_pixels / TILE_WIDTH +
+        if opts.width_in_pixels % TILE_WIDTH > 0 {
+            1
+        } else {
+            0
+        };
+    let height_in_tiles = opts.height_in_pixels / TILE_HEIGHT +
+        if opts.height_in_pixels % TILE_HEIGHT > 0 {
+            1
+        } else {
+            0
+        };
+
+    for j in range(0i, height_in_tiles) {
+        for i in range(0i, width_in_tiles) {
+            tile(Tile {i: i, j: j}, opts, buf);
+        }
+    }
+}
+
+fn write(opts: &Options, buf: &Vec<Rgb>) {
+    println!("P3 {} {} {}", opts.width_in_pixels, opts.height_in_pixels, 255u);
+
+    for y in range(0i, opts.height_in_pixels) {
+        for x in range(0i, opts.width_in_pixels) {
+            let index = (y * opts.height_in_pixels + x) as uint;
+            let rgb = buf[index];
+
+            // Gamma correction.
+            let one_over_gamma = 1.0f32 / 2.2f32;
+            let r8 = (rgb.r.powf(one_over_gamma) * 255.0) as u8;
+            let g8 = (rgb.g.powf(one_over_gamma) * 255.0) as u8;
+            let b8 = (rgb.b.powf(one_over_gamma) * 255.0) as u8;
+
+            print!("{} {} {} ", r8, g8, b8);
         }
         print!("\n");
     }
 }
 
 fn main() {
-    let width = 640i;
-    let height = 480i;
-    let depth = 256i;
-    let window = Window {x0: -2.0, x1: 1.0, y0: -1.0, y1: 1.0};
+    let opts = Options {
+        width_in_pixels: 640,
+        height_in_pixels: 480,
+        iterations: 256,
+        window: Window {
+            x0: -2.0, x1: 1.0,
+            y0: -1.0, y1: 1.0
+        }
+    };
 
-    println!("P3 {} {} {}", width, height, depth);
+    let num_pixels = (opts.width_in_pixels * opts.height_in_pixels) as uint;
+    let mut buf: Vec<Rgb> = Vec::from_elem(num_pixels, Rgb{r: 0.0, g: 0.0, b: 0.0});
 
-    single_threaded_mandelbrot(width, height, depth, window);
+    mandelbrot(&opts, &mut buf);
+    write(&opts, &buf);
 }
