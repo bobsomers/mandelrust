@@ -1,8 +1,8 @@
 #include <utility>
 #include <cmath>
-#include <cstdint>
 #include <fstream>
 #include <iostream>
+#include <string>
 #include <vector>
 
 struct SampleOffset
@@ -20,10 +20,10 @@ struct Rgb
 
 struct Window
 {
-    float x0;
-    float x1;
-    float y0;
-    float y1;
+    float x;
+    float y;
+    float width;
+    float height;
 };
 
 struct Options
@@ -32,7 +32,7 @@ struct Options
     Window window;
     std::vector<SampleOffset> sampleOffsets;
     std::vector<float> sampleWeights;
-    float sampleWeightSum;
+    float oneOverSampleWeightSum;
     int width;
     int height;
     int tileWidth;
@@ -125,9 +125,44 @@ shade(int val, int max)
 }
 
 void
-pixel(int x, int y, const Options& opts, std::vector<Rgb>& buf)
+pixel(int px, int py, const Options& opts, std::vector<Rgb>& buf)
 {
+    const float centerX = px + 0.5f;
+    const float centerY = py + 0.5f;
 
+    Rgb accum = {0.0f, 0.0f, 0.0f};
+
+    std::size_t numSamples = opts.sampleOffsets.size();
+    for (std::size_t sampleIndex = 0; sampleIndex < numSamples; ++sampleIndex) {
+        auto offset = opts.sampleOffsets[sampleIndex];
+        
+        // Map sample to window space.
+        float x = (centerX + offset.x) / opts.width * opts.window.width + opts.window.x;
+        float y = (centerY + offset.y) / opts.height * opts.window.height + opts.window.y;
+
+        // Compute Mandelbrot set under the sample and shade it.
+        int val = mandel(x, y, opts.iterations);
+        Rgb rgb = shade(val, opts.iterations);
+
+        // Accumulate a weighted sum of the shaded samples using the
+        // precomputed sample weights from a Mitchell-Netravali filter.
+        float weight = opts.sampleWeights[sampleIndex];
+        accum.r += rgb.r * weight;
+        accum.g += rgb.g * weight;
+        accum.b += rgb.b * weight;
+    }
+
+    // Compute weighted average from weighted sum.
+    const float oneOverSampleWeightSum = opts.oneOverSampleWeightSum;
+    Rgb weightedAverage = {
+        accum.r * oneOverSampleWeightSum,
+        accum.g * oneOverSampleWeightSum,
+        accum.b * oneOverSampleWeightSum
+    };
+
+    // Write the weighted average into the buffer.
+    const std::size_t index = py * opts.width + px;
+    buf[index] = weightedAverage;
 }
 
 void
@@ -162,7 +197,7 @@ mandelbrot(const Options& opts, std::vector<Rgb>& buf)
 }
 
 void
-write(const Options& opts, const std::vector<Rgb>& buf)
+writePPM(const Options& opts, const std::vector<Rgb>& buf)
 {
     const float oneOverGamma = 1.0f / 2.2f;
 
@@ -173,12 +208,18 @@ write(const Options& opts, const std::vector<Rgb>& buf)
             const std::size_t index = y * opts.width + x;
             const Rgb& rgb = buf[index];
 
-            // Gamma correction and 8-bit quantization.
-            auto r8 = std::uint8_t(std::pow(rgb.r, oneOverGamma) * 255.0f);
-            auto g8 = std::uint8_t(std::pow(rgb.g, oneOverGamma) * 255.0f);
-            auto b8 = std::uint8_t(std::pow(rgb.b, oneOverGamma) * 255.0f);
+            if (rgb.r != rgb.r || rgb.g != rgb.g || rgb.b != rgb.b) {
+                std::cout << "NaN detected at <" << x << ", " << y << ">" << std::endl;
+            }
 
-            ppmFile << r8 << " " << g8 << " " << b8 << " ";
+            // Gamma correction and 8-bit quantization.
+            auto r8 = int(std::pow(rgb.r, oneOverGamma) * 255.0f);
+            auto g8 = int(std::pow(rgb.g, oneOverGamma) * 255.0f);
+            auto b8 = int(std::pow(rgb.b, oneOverGamma) * 255.0f);
+
+            ppmFile << std::to_string(r8) << " " <<
+                       std::to_string(g8) << " " <<
+                       std::to_string(b8) << " ";
         }
         ppmFile << "\n";
     }
@@ -226,7 +267,7 @@ int main() {
     int samples = 64;
     int iterations = 256;
     float filterSize = 2.0f;
-    Window window = {-2.0f, 1.0f, -1.0f, 1.0f};
+    Window window = {-2.0f, -1.0f, 3.0f, 2.0f};
 
     // Precompute subpixel sample offsets and weights.
     std::vector<SampleOffset> sampleOffsets(samples);
@@ -252,11 +293,13 @@ int main() {
     opts.window = window;
     opts.sampleOffsets = std::move(sampleOffsets);
     opts.sampleWeights = std::move(sampleWeights);
-    opts.sampleWeightSum = sampleWeightSum;
+    opts.oneOverSampleWeightSum = 1.0f / sampleWeightSum;
     opts.width = width;
     opts.height = height;
     opts.tileWidth = tileWidth;
     opts.tileHeight = tileHeight;
 
+    // Compute image and write it out;
     mandelbrot(opts, buf);
+    writePPM(opts, buf);
 }

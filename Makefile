@@ -1,5 +1,5 @@
 all: compile
-	./mandel > mandel.ppm
+	./mandel
 	convert mandel.ppm mandel.png
 	rm mandel.ppm
 	open mandel.png
