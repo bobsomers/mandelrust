@@ -75,13 +75,17 @@ fn pixel(pixel: Pixel, opts: &Options, buf: &mut Vec<Rgb>) {
     let val = mandel(x, y, opts.iterations);
     let rgb = shade(x, y, window_width, window_height, val, opts.iterations);
 
-    let index = ((pixel.y * opts.height_in_pixels) + pixel.x) as uint;
+    let index = ((pixel.y * opts.width_in_pixels) + pixel.x) as uint;
     *buf.get_mut(index) = rgb;
+
+    //println!("\tpixel = <{}, {}>, index = {}", pixel.x, pixel.y, index);
 }
 
 fn tile(tile: Tile, opts: &Options, buf: &mut Vec<Rgb>) {
     let offset_x = tile.i * TILE_WIDTH;
     let offset_y = tile.j * TILE_HEIGHT;
+
+    //println!("tile = <{}, {}>", tile.i, tile.j);
 
     for ty in range(0i, TILE_HEIGHT) {
         let y = offset_y + ty;
@@ -118,7 +122,7 @@ fn write(opts: &Options, buf: &Vec<Rgb>) {
 
     for y in range(0i, opts.height_in_pixels) {
         for x in range(0i, opts.width_in_pixels) {
-            let index = (y * opts.height_in_pixels + x) as uint;
+            let index = (y * opts.width_in_pixels + x) as uint;
             let rgb = buf[index];
 
             // Gamma correction.
