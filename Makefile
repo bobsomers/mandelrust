@@ -1,6 +1,7 @@
 all: prog
 	./mandel > mandel.ppm
 	convert mandel.ppm mandel.png
+	rm mandel.ppm
 	open mandel.png
 
 prog: mandel.rs
