@@ -11,7 +11,8 @@ plot: compile
 	gnuplot mitchell_2d.plot; open mitchell_2d.png
 
 compile: mandel.cc
-	g++ -std=c++11 -Wall -Wextra -fopenmp -O3 -o mandel mandel.cc
+	#g++ -std=c++11 -Wall -Wextra -fopenmp -O3 -o mandel mandel.cc
+	clang++ -std=c++11 -Wall -Wextra -O3 -o mandel mandel.cc
 
 #all: compile
 #	./mandel > mandel.ppm

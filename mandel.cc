@@ -120,10 +120,10 @@ mandel(float cReal, float cImag, int iterations)
 Rgb
 shade(int val, int max)
 {
-    const float v = float(val) / max;
+    const float v = (val <= 20) ? 0.0f : float(val - 21) / (max - 21);
 
-    const Rgb a = {0.23137254901961, 0.34901960784314, 0.59607843137255};
-    const Rgb b = {0.91372549019608, 0.91764705882353, 0.92941176470588};
+    const Rgb a = {0.039947171001526, 0.098689197541096, 0.320381548791812};
+    const Rgb b = {0.819963705323531, 0.827725794455035, 0.851251645184511};
     const Rgb dist = {b.r - a.r, b.g - a.g, b.b - a.b};
 
     return {
@@ -273,11 +273,11 @@ void writeSamplingData()
 int main() {
     //writeSamplingData();
 
-    int width = 918;
-    int height = 340;
+    int width = 2700;
+    int height = 1000;
     int tileWidth = 64;
     int tileHeight = 64;
-    int samples = 16;
+    int samples = 1;
     int iterations = 256;
     float filterSize = 2.0f;
     //Window window = {-2.0f, -1.0f, 3.0f, 2.0f};
