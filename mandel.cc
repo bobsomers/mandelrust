@@ -152,6 +152,12 @@ pixel(int px, int py, const Options& opts, std::vector<Rgb>& buf)
         accum.b += rgb.b * weight;
     }
 
+    // Clamp low end to zero. Protects against cases where we only hit the
+    // Mandelbrot with a single sample in the filter's negative lobe.
+    accum.r = std::max(accum.r, 0.0f);
+    accum.g = std::max(accum.g, 0.0f);
+    accum.b = std::max(accum.b, 0.0f);
+
     // Compute weighted average from weighted sum.
     const float oneOverSampleWeightSum = opts.oneOverSampleWeightSum;
     Rgb weightedAverage = {
@@ -207,10 +213,6 @@ writePPM(const Options& opts, const std::vector<Rgb>& buf)
         for (int x = 0; x < opts.width; ++x) {
             const std::size_t index = y * opts.width + x;
             const Rgb& rgb = buf[index];
-
-            if (rgb.r != rgb.r || rgb.g != rgb.g || rgb.b != rgb.b) {
-                std::cout << "NaN detected at <" << x << ", " << y << ">" << std::endl;
-            }
 
             // Gamma correction and 8-bit quantization.
             auto r8 = int(std::pow(rgb.r, oneOverGamma) * 255.0f);
