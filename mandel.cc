@@ -1,8 +1,12 @@
-#include <utility>
+#include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <fstream>
 #include <iostream>
+#include <numeric>
 #include <string>
+#include <thread>
+#include <utility>
 #include <vector>
 
 struct SampleOffset
@@ -26,6 +30,14 @@ struct Window
     float height;
 };
 
+struct TileSet
+{
+    std::vector<int>& tiles;
+    int first;
+    int last;
+    int widthTiles;
+};
+
 struct Options
 {
     int iterations;
@@ -37,6 +49,7 @@ struct Options
     int height;
     int tileWidth;
     int tileHeight;
+    int numThreads;
 };
 
 inline float
@@ -197,6 +210,17 @@ tile(int i, int j, const Options& opts, std::vector<Rgb>& buf)
 }
 
 void
+tileset(TileSet tileSet, const Options& opts, std::vector<Rgb>& buf)
+{
+    for (int k = tileSet.first; k < tileSet.last; ++k) {
+        int tileIndex = tileSet.tiles[k];
+        int i = tileIndex % tileSet.widthTiles;
+        int j = tileIndex / tileSet.widthTiles;
+        tile(i, j, opts, buf);
+    }
+}
+
+void
 mandelbrot(const Options& opts, std::vector<Rgb>& buf)
 {
     const int widthTiles = (opts.width / opts.tileWidth) +
@@ -205,11 +229,36 @@ mandelbrot(const Options& opts, std::vector<Rgb>& buf)
             ((opts.height % opts.tileHeight > 0) ? 1 : 0);
     const int numTiles = widthTiles * heightTiles;
 
-#pragma omp parallel for
-    for (int tileIndex = 0; tileIndex < numTiles; ++tileIndex) {
-        int i = tileIndex % widthTiles;
-        int j = tileIndex / widthTiles;
-        tile(i, j, opts, buf);
+    // Jumble the tile order to pretend like we're load balancing.
+    std::vector<int> tiles(numTiles);
+    std::iota(tiles.begin(), tiles.end(), 0);
+    std::random_shuffle(tiles.begin(), tiles.end());
+
+    // How many tiles per thread?
+    int tilesPerThread = numTiles / opts.numThreads;
+    int lastThreadTiles = tilesPerThread;
+    if (numTiles % opts.numThreads > 0) {
+        ++tilesPerThread;
+        lastThreadTiles = numTiles - ((opts.numThreads - 1) * tilesPerThread);
+    }
+
+    // Launch work on a thread pool.
+    std::vector<std::thread> threadPool(opts.numThreads);
+    for (std::size_t threadIdx = 0; threadIdx < threadPool.size(); ++threadIdx) {
+        int first = threadIdx * tilesPerThread;
+        int last = first + ((threadIdx == threadPool.size() - 1) ? lastThreadTiles : tilesPerThread);
+
+        std::cout << "Launching " << (last - first) << " tiles on thread #" <<
+                threadIdx << "\n";
+
+        TileSet tileSet = {tiles, first, last, widthTiles};
+        threadPool[threadIdx] =
+                std::thread(tileset, tileSet, std::ref(opts), std::ref(buf));
+    }
+
+    // Join all the threads.
+    for (std::size_t threadIdx = 0; threadIdx < threadPool.size(); ++threadIdx) {
+        threadPool[threadIdx].join();
     }
 }
 
@@ -273,15 +322,16 @@ void writeSamplingData()
 int main() {
     //writeSamplingData();
 
-    int width = 2700;
-    int height = 1000;
-    int tileWidth = 64;
-    int tileHeight = 64;
-    int samples = 1;
+    int width = 675;
+    int height = 250;
+    int tileWidth = 16;
+    int tileHeight = 16;
+    int samples = 1024;
     int iterations = 256;
     float filterSize = 2.0f;
     //Window window = {-2.0f, -1.0f, 3.0f, 2.0f};
     Window window = {-0.4f, -0.683f, 0.265f, 0.1f};
+    int numThreads = 5;
 
     // Precompute subpixel sample offsets and weights.
     std::vector<SampleOffset> sampleOffsets(samples);
@@ -312,6 +362,7 @@ int main() {
     opts.height = height;
     opts.tileWidth = tileWidth;
     opts.tileHeight = tileHeight;
+    opts.numThreads = numThreads;
 
     // Compute image and write it out;
     mandelbrot(opts, buf);
