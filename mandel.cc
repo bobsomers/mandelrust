@@ -194,11 +194,13 @@ mandelbrot(const Options& opts, std::vector<Rgb>& buf)
             ((opts.width % opts.tileWidth > 0) ? 1 : 0);
     const int heightTiles = (opts.height / opts.tileHeight) +
             ((opts.height % opts.tileHeight > 0) ? 1 : 0);
+    const int numTiles = widthTiles * heightTiles;
 
-    for (int j = 0; j < heightTiles; ++j) {
-        for (int i = 0; i < widthTiles; ++i) {
-            tile(i, j, opts, buf);
-        }
+#pragma omp parallel for
+    for (int tileIndex = 0; tileIndex < numTiles; ++tileIndex) {
+        int i = tileIndex % widthTiles;
+        int j = tileIndex / widthTiles;
+        tile(i, j, opts, buf);
     }
 }
 
