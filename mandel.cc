@@ -120,8 +120,17 @@ mandel(float cReal, float cImag, int iterations)
 Rgb
 shade(int val, int max)
 {
-    const float v = (val < max - 1) ? float(val) / max : 0.0f;
-    return {v, v, v};
+    const float v = float(val) / max;
+
+    const Rgb a = {0.23137254901961, 0.34901960784314, 0.59607843137255};
+    const Rgb b = {0.91372549019608, 0.91764705882353, 0.92941176470588};
+    const Rgb dist = {b.r - a.r, b.g - a.g, b.b - a.b};
+
+    return {
+        v * dist.r + a.r,
+        v * dist.g + a.g,
+        v * dist.b + a.b
+    };
 }
 
 void
@@ -264,14 +273,15 @@ void writeSamplingData()
 int main() {
     //writeSamplingData();
 
-    int width = 640;
-    int height = 480;
-    int tileWidth = 8;
-    int tileHeight = 8;
-    int samples = 64;
+    int width = 918;
+    int height = 340;
+    int tileWidth = 64;
+    int tileHeight = 64;
+    int samples = 16;
     int iterations = 256;
     float filterSize = 2.0f;
-    Window window = {-2.0f, -1.0f, 3.0f, 2.0f};
+    //Window window = {-2.0f, -1.0f, 3.0f, 2.0f};
+    Window window = {-0.4f, -0.683f, 0.265f, 0.1f};
 
     // Precompute subpixel sample offsets and weights.
     std::vector<SampleOffset> sampleOffsets(samples);
