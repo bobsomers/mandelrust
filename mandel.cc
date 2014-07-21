@@ -1,7 +1,9 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <deque>
 #include <fstream>
+#include <future>
 #include <iostream>
 #include <numeric>
 #include <string>
@@ -32,9 +34,7 @@ struct Window
 
 struct TileSet
 {
-    std::vector<int>& tiles;
-    int first;
-    int last;
+    std::vector<int> tiles;
     int widthTiles;
 };
 
@@ -50,6 +50,7 @@ struct Options
     int tileWidth;
     int tileHeight;
     int numThreads;
+    int numTilesPerBatch;
 };
 
 inline float
@@ -212,8 +213,7 @@ tile(int i, int j, const Options& opts, std::vector<Rgb>& buf)
 void
 tileset(TileSet tileSet, const Options& opts, std::vector<Rgb>& buf)
 {
-    for (int k = tileSet.first; k < tileSet.last; ++k) {
-        int tileIndex = tileSet.tiles[k];
+    for (int tileIndex : tileSet.tiles) {
         int i = tileIndex % tileSet.widthTiles;
         int j = tileIndex / tileSet.widthTiles;
         tile(i, j, opts, buf);
@@ -230,35 +230,53 @@ mandelbrot(const Options& opts, std::vector<Rgb>& buf)
     const int numTiles = widthTiles * heightTiles;
 
     // Jumble the tile order to pretend like we're load balancing.
-    std::vector<int> tiles(numTiles);
+    std::deque<int> tiles(numTiles);
     std::iota(tiles.begin(), tiles.end(), 0);
     std::random_shuffle(tiles.begin(), tiles.end());
+    
+    // Create a future pool. (ZOMG!)
+    std::vector<std::future<void>> futures(opts.numThreads);
+    while (true) {
+        bool workLaunched = false;
+        bool workWaiting = false;
 
-    // How many tiles per thread?
-    int tilesPerThread = numTiles / opts.numThreads;
-    int lastThreadTiles = tilesPerThread;
-    if (numTiles % opts.numThreads > 0) {
-        ++tilesPerThread;
-        lastThreadTiles = numTiles - ((opts.numThreads - 1) * tilesPerThread);
-    }
+        for (std::size_t f = 0; f < futures.size(); ++f) {
+            if (!futures[f].valid()) {
+                // Do we have work to do?
+                std::size_t batchSize =
+                        std::min(std::size_t(opts.numTilesPerBatch), tiles.size());
+                if (batchSize == 0) continue;
+                
+                // We have work to do, fill up the batch.
+                std::vector<int> tileBatch(batchSize);
+                for (std::size_t i = 0; i < batchSize; ++i) {
+                    tileBatch[i] = tiles.front();
+                    tiles.pop_front();
+                }
 
-    // Launch work on a thread pool.
-    std::vector<std::thread> threadPool(opts.numThreads);
-    for (std::size_t threadIdx = 0; threadIdx < threadPool.size(); ++threadIdx) {
-        int first = threadIdx * tilesPerThread;
-        int last = first + ((threadIdx == threadPool.size() - 1) ? lastThreadTiles : tilesPerThread);
+                // Launch the work.
+                TileSet tileSet = {std::move(tileBatch), widthTiles};
+                futures[f] = std::async(std::launch::async,
+                        tileset, tileSet, std::ref(opts), std::ref(buf));
+                workLaunched = true;
+                std::cout << "[" << f << "] Started " << batchSize << " tiles.\n"; 
+            } else {
+                // Is the work complete?
+                auto status = futures[f].wait_for(std::chrono::milliseconds(0));
+                if (status == std::future_status::ready) {
+                    // All done, clear the future and mark it invalid.
+                    futures[f].get();
+                    futures[f] = std::future<void>();
+                    std::cout << "[" << f << "] Complete. (" << tiles.size() << " pending)\n";
+                } else {
+                    // Nope, still waiting.
+                    workWaiting = true;
+                }
+            }
+        }
 
-        std::cout << "Launching " << (last - first) << " tiles on thread #" <<
-                threadIdx << "\n";
-
-        TileSet tileSet = {tiles, first, last, widthTiles};
-        threadPool[threadIdx] =
-                std::thread(tileset, tileSet, std::ref(opts), std::ref(buf));
-    }
-
-    // Join all the threads.
-    for (std::size_t threadIdx = 0; threadIdx < threadPool.size(); ++threadIdx) {
-        threadPool[threadIdx].join();
+        bool moreWork = (tiles.size() > 0);
+        if (!(workLaunched || workWaiting || moreWork)) break;
     }
 }
 
@@ -331,7 +349,10 @@ int main() {
     float filterSize = 2.0f;
     //Window window = {-2.0f, -1.0f, 3.0f, 2.0f};
     Window window = {-0.4f, -0.683f, 0.265f, 0.1f};
-    int numThreads = 5;
+    int numThreads = 6;
+    int numTilesPerBatch = 27;
+
+    std::cout << "Running on " << numThreads << " threads.\n";
 
     // Precompute subpixel sample offsets and weights.
     std::vector<SampleOffset> sampleOffsets(samples);
@@ -363,6 +384,7 @@ int main() {
     opts.tileWidth = tileWidth;
     opts.tileHeight = tileHeight;
     opts.numThreads = numThreads;
+    opts.numTilesPerBatch = numTilesPerBatch;
 
     // Compute image and write it out;
     mandelbrot(opts, buf);
